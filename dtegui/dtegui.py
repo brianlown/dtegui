@@ -10,6 +10,8 @@ import sys
 import math
 from functools import partial
 import click
+import struct
+from decimal import Decimal
 
 LINUX_PROMPT = "~ # "
 DTE_PROMPT = "root@localhost>"
@@ -21,6 +23,7 @@ DTE_DELAY=.001
 @click.command()
 @click.argument('shelfip')
 @click.argument('slotnum')
+@click.argument('cuhi')
 @click.argument('slotipv6')
 @click.argument('cfg_file')
 @click.option('--ssh_echo',default=False)
@@ -33,7 +36,7 @@ def dteguiCli(shelfip,slotnum,slotipv6,cfg_file,ssh_echo,debug):
     os._exit(0)
 
 class dtegui:
-    def __init__(self, master, shelfIP, slotNum, slotIpv6,cfg_file,ssh_echo=False,debug=False):
+    def __init__(self,master,shelfIP,slotNum,cuhi,slotIpv6,cfg_file,ssh_echo=False,debug=False):
         self.builder = builder = pygubu.Builder()
         self.master = master
         with open(cfg_file,'r') as f:
@@ -41,10 +44,10 @@ class dtegui:
         genDict = configDict['General']
         libpath = cfg_file.rsplit('\\',1)[0]+"\\"
         builder.add_from_file(libpath+genDict['uiFile'])
-        print (builder.tkvariables)
         self.mainwindow = builder.get_object(genDict['topFrame'], master)
         master.title(genDict['winTitle'])
         master.iconbitmap(libpath+genDict['icoFile'])
+        master.protocol("WM_DELETE_WINDOW", self.terminate)
         self.ssh = None
         self.slotNumVar = builder.tkvariables.__getitem__('slotNumVar')
         self.shelfIPVar = builder.tkvariables.__getitem__('shelfIPVar')
@@ -54,11 +57,13 @@ class dtegui:
         self.slotIpv6= slotIpv6
         self.slotNumVar.set(slotNum)
         self.shelfIPVar.set(shelfIP)
+        self.cuhi = cuhi
 
         self.cfg_file=cfg_file
         self.queueThread = None
         self.pollThread = None
         self.initThread = None
+        self._running = True
         self.cmdq = queue.Queue()
         self.applyDict={}
         self.initList=[]
@@ -67,9 +72,10 @@ class dtegui:
         self.debug=debug
         self.sshEcho=ssh_echo
         self.configGui()
-        self.notebook = builder.get_object('Notebook_1')
+        self.notebook = builder.get_object(genDict['mainNotebook'])
         self.notebook.bind("<<NotebookTabChanged>>", self.handle_tab_changed)
         self.current_tab = tk.StringVar()
+        self.current_tab.set(genDict['initTab'])
 
         builder.connect_callbacks(self)
         
@@ -81,6 +87,10 @@ class dtegui:
             
         master.destroy()
         print("Unable to start DTE!")
+        
+    def terminate(self):
+        self._running=False
+        self.master.destroy()
         
     def startDTE(self):
     
@@ -96,10 +106,11 @@ class dtegui:
         if (prompt==1):
             return False
         if self.debug:print(ssh.before)
-        ssh.sendln("go debug/aosFwHal/adva.hbmcard.qflex")
+        dteDir = self.configDict["General"]["dteDirectory"][self.cuhi]
+        ssh.sendln("go "+dteDir)
         ssh.expect(DTE_PROMPT)
         if self.debug:print(ssh.before)
-        if "[/debug/aosFwHal/adva.hbmcard.qflex]" in ssh.before:
+        if "["+dteDir+"]" in ssh.before:
             return True
         return False
         
@@ -178,7 +189,7 @@ class dtegui:
         self.var.start()
         
     def queue_handler(self):
-        while (1):
+        while (self._running):
             if not self.cmdq.empty():
                 command,type,parse,decoders,vars=self.cmdq.get()
                 self.ssh.sendln(command)
@@ -207,7 +218,7 @@ class dtegui:
             time.sleep(DTE_DELAY)
                 
     def poll_handler(self):
-        while (1):
+        while (self._running):
             if self.vars["polling_enable"].get()==0:
                 if self.debug: print("Exiting polling....")
                 return
@@ -315,6 +326,14 @@ def twos_complement(hexstr,bits):
     if value & (1 << (bits-1)):
         value -= 1 << bits
     return value
+    
+def float_e(intval):
+    h = hex(intval)[2:]
+    while len(h) < 8:
+        h = '0'+h
+    value = struct.unpack('!f',bytes.fromhex(h))[0]
+    return '%.2E' % Decimal(value)
+
 
 if __name__ == '__main__':
     dteguiCli()

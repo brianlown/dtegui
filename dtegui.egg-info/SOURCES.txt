@@ -1,8 +1,8 @@
 README.rst
-pyproject.toml
 setup.py
 dtegui/__init__.py
 dtegui/dtegui.py
+dtegui/index.ico
 dtegui/qflex.json
 dtegui/qflex.ui
 dtegui.egg-info/PKG-INFO
