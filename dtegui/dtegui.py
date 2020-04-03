@@ -321,7 +321,7 @@ class initThread (threading.Thread):
     def run(self):
         self.ad.init_handler()
         
-def twos_complement(hexstr,bits):
+def signed(hexstr,bits):
     value = int(hexstr,16)
     if value & (1 << (bits-1)):
         value -= 1 << bits
