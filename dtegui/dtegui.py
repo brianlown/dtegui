@@ -14,7 +14,7 @@ import struct
 from decimal import Decimal
 
 LINUX_PROMPT = "~ # "
-DTE_PROMPT = "root@localhost>"
+DTE_PROMPT = "root@.+>"
 SSH_USERNAME="root"
 SSH_PORT=614
 POLL_DELAY = .100
@@ -93,23 +93,19 @@ class dtegui:
         self.master.destroy()
         
     def startDTE(self):
-    
-        self.ssh = ssh = sshexpect.spawn(ipaddress=self.shelfIP,username=SSH_USERNAME,port=SSH_PORT)
-        if ssh.closed: return False
-        if self.debug:print("SSH session started.")
-        ssh.expect(LINUX_PROMPT)
-        ssh.sendln("ssh -o StrictHostKeyChecking=no root@"+self.slotIpv6+"%mgmt")
-        ssh.expect(LINUX_PROMPT)
-        if self.debug:print(ssh.before)
-        ssh.sendln("aosCoreDteConsole")
-        prompt = ssh.expect([DTE_PROMPT,LINUX_PROMPT])
-        if (prompt==1):
+        try:
+            self.ssh = ssh = sshexpect.spawn(ipaddress=self.shelfIP,username=SSH_USERNAME,port=SSH_PORT)
+            ssh.expect(LINUX_PROMPT) 
+            ssh.sendln("ssh -o StrictHostKeyChecking=no root@"+self.slotIpv6+"%mgmt")
+            ssh.expect(LINUX_PROMPT) 
+            ssh.sendln("aosCoreDteConsole")
+            ssh.expect(DTE_PROMPT)
+            dteDir = self.configDict["General"]["dteDirectory"][self.cuhi]
+            ssh.sendln("go "+dteDir)
+            ssh.expect(DTE_PROMPT)
+        except:
             return False
-        if self.debug:print(ssh.before)
-        dteDir = self.configDict["General"]["dteDirectory"][self.cuhi]
-        ssh.sendln("go "+dteDir)
-        ssh.expect(DTE_PROMPT)
-        if self.debug:print(ssh.before)
+
         if "["+dteDir+"]" in ssh.before:
             return True
         return False
