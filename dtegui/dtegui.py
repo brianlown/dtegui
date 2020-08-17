@@ -12,6 +12,7 @@ from functools import partial
 import click
 import struct
 from decimal import Decimal
+import distutils
 
 LINUX_PROMPT = "~ # "
 DTE_PROMPT = "root@.+>"
@@ -121,8 +122,11 @@ class dtegui:
                     value = self.vars[varname].get()
                     groupName = varDict["Group"][0]
                     for item in self.applyDict[groupName]:
-                        if item == varname: continue
-                        self.vars[item].set(value)
+                        if item != varname:
+                            self.vars[item].set(value)
+                        itemVarEventDict = self.configDict["Variables"][item]["EventCmd"]
+                        self.cmdq.put(self.elaborateCmd(itemVarEventDict[0],itemVarEventDict[1]))
+                    return
             
         self.cmdq.put(self.elaborateCmd(command,cmdType))
     
@@ -130,7 +134,8 @@ class dtegui:
         parseArgs=[]
         decode=[]
         vars =[]
-        cmdDict = self.configDict["Commands"][command]   
+        errs = None
+        cmdDict = self.configDict["Commands"][command]
         if cmdType in cmdDict:
             cmdStr = cmdDict[cmdType][:]
             if cmdType=="Read":
@@ -153,6 +158,7 @@ class dtegui:
                 
         if cmdType == "Write":
             val = self.vars[cmdDict["Var"][0]].get()
+            if self.debug: print ("Write value:",val)
             if "Codec" in cmdDict:
                 codecs = cmdDict["Codec"]
                 for codec in codecs:
@@ -169,13 +175,22 @@ class dtegui:
                 codecs = cmdDict["Codec"]
                 if self.debug: print(codecs)
                 for codec in codecs:
-                    codecDict = self.configDict["Codecs"][codec]
-                    if "Decode" in codecDict:
-                        decode.append(codecDict["Decode"])
+                    if codec in self.configDict["Codecs"]:
+                        codecDict = self.configDict["Codecs"][codec]
+                        if "Decode" in codecDict:
+                            decode.append(codecDict["Decode"])
+                        else:
+                            decode.append("")
                     else:
                         decode.append("")
+                        
+            if "Errors" in cmdDict:
+                errs = cmdDict["Errors"]
+                if not isinstance(errs,list):
+                    errs= [errs]
+
         if self.debug: print("ELAB:",vars,decode)                
-        return (cmdStr,cmdType,parseArgs,decode,vars)
+        return (cmdStr,cmdType,parseArgs,decode,vars,errs)
                         
     
     def startThread(self,var,thread):
@@ -187,7 +202,7 @@ class dtegui:
     def queue_handler(self):
         while (self._running):
             if not self.cmdq.empty():
-                command,type,parse,decoders,vars=self.cmdq.get()
+                command,type,parse,decoders,vars,errs=self.cmdq.get()
                 self.ssh.sendln(command)
                 self.ssh.expect(DTE_PROMPT)
                 if self.sshEcho: print ("SSH:",self.ssh.before)
@@ -195,18 +210,21 @@ class dtegui:
                     if self.debug: print(parse,decoders,vars)
                     strvals = self.ssh.parsebefore(split=parse[0],trigger=parse[1],location=parse[2])
                     if self.debug: print("Parsed Value:",strvals)
-                    if len (strvals) < len(vars):
-                        print ("DTE parse of read command failed!")
+                    if len(strvals) < len(vars):
+                        if self.debug: print ("DTE parse of read command failed!")
+                        if errs:
+                            for idx,var in enumerate(vars):
+                                var.set(errs[idx])
                         self.cmdq.task_done()
                         continue
                     for idx,var in enumerate(vars):
                         val=strvals[idx]
+                        retval=val
                         if len(decoders)>0:
                             decoder = decoders[idx]
                             if self.debug: print("Decoder:", decoder)
-                            retval = eval(decoder)
-                        else:
-                            retval=val[0]
+                            if decoder!="":
+                                retval = eval(decoder)
                         var.set(retval)
                         if self.debug: print("New Value: ",retval)
                         if self.debug: print("Var: ",var)
